@@ -7,7 +7,6 @@ import torch.nn.functional as F
 from params import *
 from torch.distributions import Normal
 from torch.optim import Adam
-import math
 
 # ---Directory Path---#
 dirPath = os.path.dirname(os.path.realpath(__file__))
@@ -54,9 +53,6 @@ def weights_init_(m):
 
 
 def soft_update(target, source, tau):
-    """
-    向量乘标量
-    """
     """target net的权重更新基于Q-net的权重,进行动量更新"""
     for target_param, param in zip(target.parameters(), source.parameters()):
         target_param.data.copy_(target_param.data * (1.0 - tau) + param.data * tau)
@@ -74,6 +70,7 @@ def action_unnormalized(action, high, low):
     action = np.clip(action, low, high)
     return action
 
+
 class QNetwork(nn.Module):
     """奖励评估网络,负责根据状态和动作,预测奖励值"""
 
@@ -84,57 +81,37 @@ class QNetwork(nn.Module):
         self.linear1_q1 = nn.Linear(state_dim + action_dim, hidden_dim)
         self.linear2_q1 = nn.Linear(hidden_dim, hidden_dim)
         # self.linear3_q1 = nn.Linear(hidden_dim, hidden_dim)
-        self.linear4_q1 = nn.Linear(hidden_dim, 1)
+        self.linear3_q1 = nn.Linear(hidden_dim, 1)
 
         # Q2
         self.linear1_q2 = nn.Linear(state_dim + action_dim, hidden_dim)
         self.linear2_q2 = nn.Linear(hidden_dim, hidden_dim)
         #  self.linear3_q2 = nn.Linear(hidden_dim, hidden_dim)
-        self.linear4_q2 = nn.Linear(hidden_dim, 1)
-
-        self.r_W1_q1 = torch.zeros((hidden_dim, state_dim + action_dim))
-        self.r_W2_q1 = torch.zeros((hidden_dim, hidden_dim))
-        self.r_W3_q1 = torch.zeros((1, hidden_dim))
-
-        self.r_W1_q2 = torch.zeros((hidden_dim, state_dim + action_dim))
-        self.r_W2_q2 = torch.zeros((hidden_dim, hidden_dim))
-        self.r_W3_q2 = torch.zeros((1, hidden_dim))
-
-        self.m_W1_q1 = torch.zeros((hidden_dim, state_dim + action_dim))
-        self.m_W2_q1 = torch.zeros((hidden_dim, hidden_dim))
-        self.m_W3_q1 = torch.zeros((1, hidden_dim))
-
-        self.m_W1_q2 = torch.zeros((hidden_dim, state_dim + action_dim))
-        self.m_W2_q2 = torch.zeros((hidden_dim, hidden_dim))
-        self.m_W3_q2 = torch.zeros((1, hidden_dim))
+        self.linear3_q2 = nn.Linear(hidden_dim, 1)
 
         self.apply(weights_init_)
         self.forward_t = 0
         self.forward_cnt = 0
 
     def forward(self, state, action):
-        
         # print(f"critic forward: {state.shape}, {action.shape}")
         t1 = time.time()
-        self.x_state_action = torch.cat([state, action], 1)
+        x_state_action = torch.cat([state, action], 1)
 
-        self.x1_q1 = F.relu(self.linear1_q1(self.x_state_action))
-        self.x2_q1 = F.relu(self.linear2_q1(self.x1_q1))
+        x1 = F.relu(self.linear1_q1(x_state_action))
+        x1 = F.relu(self.linear2_q1(x1))
         # x1 = F.relu(self.linear3_q1(x1))
-        q1 = self.linear4_q1(self.x2_q1)
+        x1 = self.linear3_q1(x1)
 
-        self.x1_q2 = F.relu(self.linear1_q2(self.x_state_action))
-        self.x2_q2 = F.relu(self.linear2_q2(self.x1_q2))
+        x2 = F.relu(self.linear1_q2(x_state_action))
+        x2 = F.relu(self.linear2_q2(x2))
         # x2 = F.relu(self.linear3_q2(x2))
-        q2 = self.linear4_q2(self.x2_q2)
+        x2 = self.linear3_q2(x2)
         self.forward_t += time.time() - t1
         self.forward_cnt += 1
 
-        return q1, q2 
+        return x1, x2
 
-    def get_critic_delta(self, x1, x2, q):
-        return 2 * (x1 - q), 2 * (x2 - q)
-    
 
 class PolicyNetwork(nn.Module):
     """策略动作网络,根据状态,预估最佳动作"""
@@ -157,89 +134,36 @@ class PolicyNetwork(nn.Module):
         self.forward_t = 0
         self.forward_cnt = 0
 
-        self.epsilon = 1e-6
-        self.tr12 = 0
-        self.te12 = 0
-        self.tr23 = 0
-        self.te23 = 0
-
-        self.r_W1 = torch.zeros((hidden_dim, state_dim))
-        self.r_W2 = torch.zeros((hidden_dim, hidden_dim))
-        self.r_W_mean = torch.zeros((action_dim, hidden_dim))
-        self.r_W_logstd = torch.zeros((action_dim, hidden_dim))
-
-        self.m_W1 = torch.zeros((hidden_dim, state_dim))
-        self.m_W2 = torch.zeros((hidden_dim, hidden_dim))
-        self.m_W_mean = torch.zeros((action_dim, hidden_dim))
-        self.m_W_logstd = torch.zeros((action_dim, hidden_dim))
-
-
     def forward(self, state):
         """动作[Vx,Vy]的均值和标准差的对数"""
         # print(f"policy forward: {state.shape}")
         t1 = time.time()
-        self.state = state
-        self.x1 = F.relu(self.linear1(state))
-        self.x2 = F.relu(self.linear2(self.x1))
-        mean = self.mean_linear(self.x2)
-        log_std = self.log_std_linear(self.x2)
+        x = F.relu(self.linear1(state))
+        x = F.relu(self.linear2(x))
+        mean = self.mean_linear(x)
+        log_std = self.log_std_linear(x)
         log_std = torch.clamp(log_std, min=self.log_std_min, max=self.log_std_max)
         self.forward_t += time.time() - t1
         self.forward_cnt += 1
 
         return mean, log_std
 
-    def sample(self, state, train, epsilon=1e-6):
+    def sample(self, state, epsilon=1e-6):
         """根据动作[Vx,Vy]的均值和标准差的进行正态分布采样"""
         # 正态分布采样
-        t1 = time.time()
         mean, log_std = self.forward(state)
-        t2 = time.time()
-        if train:
-            self.tr12 += t2-t1
-        else:
-            self.te12 += t2-t1
-
-
         std = log_std.exp()
         normal = Normal(mean, std)
         # x_t = mean + eps * std, eps是不依赖与mean和std的正态分布采样
         x_t = normal.rsample()
-
         # tanh限制action的范围为[-1,1]
         action = torch.tanh(x_t)
         # tanh-log_prob, 重新计算概率分布
         log_prob = normal.log_prob(x_t)
         log_prob -= torch.log(1 - action.pow(2) + epsilon)
         log_prob = log_prob.sum(1, keepdim=True)
+        return action, log_prob, mean, log_std
 
-
-        t3 = time.time()
-        if train:
-            self.tr23 += t3-t2
-        else:
-            self.te23 += t3 - t2
-        return action, log_prob, mean, log_std, x_t
-
-    def get_policy_delta(self, action, mean, log_std, x_t, epsilon, alpha):
-        """
-            action: [256,2]
-            mean: [256,2]
-            epsilon: 标量
-            alpha: 标量
-        """
-        alpha_d_256 = alpha
-
-        action_s = action * action
-        one_minus_action_s = 1 - action_s
-        ookinafakutaa = (2 * action * one_minus_action_s)/(one_minus_action_s + 1e-6)
-        sample_eps_times_std = (x_t - mean)
-
-        delta_mean = alpha_d_256 * ookinafakutaa
-        delta_std = alpha_d_256 * (ookinafakutaa * sample_eps_times_std - 1)
-
-        return delta_mean, delta_std    
-    
 
 class SAC(object):
     def __init__(
@@ -280,25 +204,12 @@ class SAC(object):
         self.update_actor_t = 0
         self.update_alpha_t = 0
         self.update_tq_t = 0
-        self.t12 = 0
-        self.t23 = 0
-        self.t34 = 0
-        self.t45 = 0
-        self.t56 = 0
-        self.t67 = 0
-        self.t78 = 0
-        self.t89 = 0
-        self.t910 = 0
-        self.t1011 = 0
-        self.t1112 = 0
-        self.t1213 = 0
-        self.t1314 = 0
 
     def select_action(self, state, eval=False):
         state = torch.FloatTensor(state).to(self.device).unsqueeze(0)
         # state: [1,n, 2+4*n]
         if eval == False:
-            action, _, _, _, _ = self.policy.sample(state, False)
+            action, _, _, _ = self.policy.sample(state)
         else:
             # _, _, action, _ = self.policy.sample(state)
             # 使用forward替代sample, 减少冗余计算, 避免无效的log_prob计算
@@ -314,7 +225,6 @@ class SAC(object):
         memory,
         batch_size,
     ):
-        t1 = time.time()
         # Sample a batch from memory
         (
             state_batch,
@@ -322,7 +232,7 @@ class SAC(object):
             reward_batch,
             next_state_batch,
             done_batch,
-        ) = memory.sample(batch_size=1)
+        ) = memory.sample(batch_size=batch_size)
 
         state_batch = torch.FloatTensor(state_batch).to(self.device)  # [batch, 122]
         next_state_batch = torch.FloatTensor(next_state_batch).to(
@@ -331,22 +241,15 @@ class SAC(object):
         action_batch = torch.FloatTensor(action_batch).to(self.device)  # [batch, 2]
         reward_batch = torch.FloatTensor(reward_batch).to(self.device).unsqueeze(1)
         done_batch = torch.FloatTensor(done_batch).to(self.device).unsqueeze(1)
-        t2 = time.time()
-        self.t12 += t2 - t1
-        t3 = 0
-        t4 = 0
+        t1 = time.time()
         # 更新Q-Net权重参数
         with torch.no_grad():
-
-            next_state_action, next_state_log_pi, mean, _, _ = self.policy.sample(
-                next_state_batch, True
+            next_state_action, next_state_log_pi, _, _ = self.policy.sample(
+                next_state_batch
             )
             qf1_next_target, qf2_next_target = self.critic_target(
                 next_state_batch, next_state_action
             )
-            t3 = time.time()
-            self.t23 += t3 - t2
-            ##### 加减乘
             min_qf_next_target = (
                 torch.min(qf1_next_target, qf2_next_target)
                 - self.alpha * next_state_log_pi
@@ -354,75 +257,53 @@ class SAC(object):
             next_q_value = reward_batch + (1 - done_batch) * self.gamma * (
                 min_qf_next_target
             )
-            t4 = time.time()
-            self.t34 += t4 - t3
-            #####
 
-            
         qf1, qf2 = self.critic(
             state_batch, action_batch
         )  # Two Q-functions to mitigate positive bias in the policy improvement step
-        t5 = time.time();
-        self.t45 += t5 - t4
         qf1_loss = F.mse_loss(qf1, next_q_value)  #
         qf2_loss = F.mse_loss(qf2, next_q_value)  #
         qf_loss = qf1_loss + qf2_loss
-        t6 = time.time()
-        self.t56 += t6 - t5
 
-        ###################
-        ### pytorch 自动 ###
-        ###################
         self.critic_optim.zero_grad()
         qf_loss.backward()
         self.critic_optim.step()
-        ###################
-        ###     手动     ###
-        ###################
-        # self.critic.backward(qf1, qf2, next_q_value)
-
-        t7 = time.time()
-        self.t67 += t7 - t6
+        t2 = time.time()
+        self.update_q_t += t2 - t1
 
         # 更新Actor(policy)权重参数
-        pi, log_pi, mean, log_std, x_t = self.policy.sample(state_batch, True)
-        t8 = time.time()
-        self.t78 += t8 - t7
-        qf1_pi, qf2_pi = self.critic(state_batch, pi)
-        t9 = time.time()
-        self.t89 += t9 - t8
-        min_qf_pi = torch.min(qf1_pi, qf2_pi)
-        policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean()
-        t10 = time.time()
-        self.t910 += t10 - t9
+        pi, log_pi, mean, log_std = self.policy.sample(state_batch)
 
-        ###################
-        ### pytorch 自动 ###
-        ###################
+        qf1_pi, qf2_pi = self.critic(state_batch, pi)
+        min_qf_pi = torch.min(qf1_pi, qf2_pi)
+
+        policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean()
+
         self.policy_optim.zero_grad()
         policy_loss.backward()
         self.policy_optim.step()
-     
 
-        t11 = time.time()
-        self.t1011 += t11 - t10
+        t3 = time.time()
+        self.update_actor_t += t3 - t2
 
         # 更新alpha参数
         alpha_loss = -(self.log_alpha * (log_pi + self.target_entropy).detach()).mean()
-        t12 = time.time()
-        self.t1112 += t12 - t11
+
         self.alpha_optim.zero_grad()
         alpha_loss.backward()
         self.alpha_optim.step()
+
         self.alpha = self.log_alpha.exp()
-        t13 = time.time()
-        self.t1213 += t13 - t12
+
+        t4 = time.time()
+        self.update_alpha_t += t4 - t3
 
         # 更新Target Net权重参数
         soft_update(self.critic_target, self.critic, self.tau)
-        t14 = time.time()
-        self.t1314 += t14 - t13
+        t5 = time.time()
+        self.update_tq_t += t5 - t4
 
+   
     # Save model parameters
     def save_models(self, episode_count):
         # torch.save(self.policy.state_dict(), 'model/' + str(episode_count)+'_policy_30.pth')
@@ -463,3 +344,4 @@ class SAC(object):
             self.alpha = self.log_alpha.exp()
             
             print('***Models load***')
+
