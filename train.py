@@ -104,8 +104,8 @@ fail_cnt = 0
 
 period = 100
 
-start = 0
-episode_idx = start
+start_p = 0
+episode_idx = start_p
 max_episode = 2000
 SAC.load_models(episode_idx)
 if episode_idx > 0:
