@@ -1,1 +1,4 @@
 all_agents
+model/
+__pycache__/
+*.txt
