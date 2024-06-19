@@ -98,17 +98,18 @@ collide_record = []
 """Episode Run"""
 
 # max_episode = min(max_episode, episode)
-episode_per_saved = 200
+episode_per_saved = 1000
 suc_cnt = 0
 fail_cnt = 0
 
 period = 100
-start = 1000
+
+start = 0
 episode_idx = start
-max_episode = 2000
+max_episode = 10000
 SAC.load_models(episode_idx)
 if episode_idx > 0:
-    with open('memory_{}'.format(episode_idx), 'rb') as outfile:
+    with open('model/memory_{}'.format(episode_idx), 'rb') as outfile:
         replay_buffer = pickle.load(outfile)
 
 # 提前生成好合法的agents
@@ -135,7 +136,7 @@ while episode_idx<max_episode:
     step_cnt = 0
     reward=0
 
-    agents = agents_list[episode_idx]
+    agents = agents_list[episode_idx % 5000]
     done_last = [agents[i].done for i in range(numAgents)]
     agent_observations = get_agent_observations(agents)  # 获得每个智能体的观测信息
     
@@ -230,7 +231,7 @@ while episode_idx<max_episode:
 
     if episode_idx % episode_per_saved == 0 or episode_idx >= max_episode:        
         SAC.save_models(episode_idx)
-        with open('memory_{}'.format(episode_idx), 'wb') as outfile:
+        with open('model/memory_{}'.format(episode_idx), 'wb') as outfile:
             pickle.dump(replay_buffer, outfile)
    
 
