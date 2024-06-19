@@ -7,9 +7,6 @@ from SAC import *
 import copy
 import pickle
 
-exceed_t = 0
-coll_t = 0
-reach_t = 0
 
 def setup_seed(seed):
     torch.manual_seed(seed)
@@ -25,6 +22,7 @@ def test_agents(numbers):
     setup_seed(42)
     agents_test = copy.deepcopy(agents_list[-numbers:])
     test_reward_list = []
+    test_arrive_list = []
 
     for i in range(numbers):
         step_cnt = 0
@@ -80,7 +78,8 @@ def test_agents(numbers):
             step_cnt = step_cnt+1
         
         test_reward_list.append(test_reward)
-    result = [round(np.mean(test_reward_list),2), round(np.std(test_reward_list),2)]
+        test_arrive_list.append(num_arrive)
+    result = [round(np.mean(test_arrive_list),2), round(np.std(test_arrive_list),2), round(np.mean(test_reward_list),2), round(np.std(test_reward_list),2)]    
     return result
 
 parser = argparse.ArgumentParser()
@@ -93,6 +92,7 @@ SAC = SAC(n_states, n_actions, hidden_dim)
 replay_buffer = ReplayBuffer(replay_buffer_size)
 reward_record = []
 Episode = []
+arrive_record = []
 collide_record = []
 
 """Episode Run"""
@@ -106,7 +106,7 @@ period = 100
 
 start = 0
 episode_idx = start
-max_episode = 10000
+max_episode = 2000
 SAC.load_models(episode_idx)
 if episode_idx > 0:
     with open('model/memory_{}'.format(episode_idx), 'rb') as outfile:
@@ -200,6 +200,7 @@ while episode_idx<max_episode:
     
     reward_record.append(reward)
     Episode.append(episode_idx)
+    arrive_record.append(num_arrive)
     collide_record.append(num_collide)
     print(
         f"{episode_idx}: agent_reward:{reward:.2f}, num_collide:{num_collide}, num_arrive:{num_arrive}",
@@ -211,8 +212,9 @@ while episode_idx<max_episode:
         t_100 = current - t0
         t0 = current
 
+        arrive = arrive_record[episode_idx-start-period :]
         rewards = reward_record[episode_idx-start-period :]
-        reward_statics = [round(np.mean(rewards),2), round(np.std(rewards),2)]
+        reward_statics = [round(np.mean(arrive),2), round(np.std(arrive),2), round(np.mean(rewards),2), round(np.std(rewards),2)]
         test_rewards = test_agents(50)
 
         with open('reward_stat.txt', 'a') as file:
