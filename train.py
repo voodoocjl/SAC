@@ -127,7 +127,7 @@ rew = Reward()
 start_time = time.time()
 t0 = start_time
 
-total = 100
+total = 5000
 start = 0
 while episode_idx<max_episode:
     setup_seed(episode_idx)
@@ -218,8 +218,8 @@ while episode_idx<max_episode:
         t_100 = current - t0
         t0 = current
 
-        arrive = arrive_record[episode_idx-start-period :]
-        rewards = reward_record[episode_idx-start-period :]
+        arrive = arrive_record[-period :]
+        rewards = reward_record[-period :]
         reward_statics = [round(np.mean(arrive),2), round(np.std(arrive),2), round(np.mean(rewards),2), round(np.std(rewards),2)]
         test_rewards = test_agents(50)
 
