@@ -127,8 +127,14 @@ rew = Reward()
 start_time = time.time()
 t0 = start_time
 
+total = 100
+start = 0
 while episode_idx<max_episode:
     setup_seed(episode_idx)
+
+    start += 1
+    if start % total == 1:
+        agents_copy = copy.deepcopy(agents_list)
 
     #记录一轮中发生碰撞和到达目的地完成任务的情况
     num_collide=0
@@ -136,7 +142,7 @@ while episode_idx<max_episode:
     step_cnt = 0
     reward=0
 
-    agents = agents_list[episode_idx % 5000]
+    agents = agents_copy[episode_idx % total]
     done_last = [agents[i].done for i in range(numAgents)]
     agent_observations = get_agent_observations(agents)  # 获得每个智能体的观测信息
     
