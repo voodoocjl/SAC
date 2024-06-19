@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from params import *
 from torch.distributions import Normal
 from torch.optim import Adam
+from torch.utils.data import TensorDataset
 
 # ---Directory Path---#
 dirPath = os.path.dirname(os.path.realpath(__file__))
@@ -224,6 +225,7 @@ class SAC(object):
         self,
         memory,
         batch_size,
+        n_batches=4
     ):
         # Sample a batch from memory
         (
@@ -232,71 +234,85 @@ class SAC(object):
             reward_batch,
             next_state_batch,
             done_batch,
-        ) = memory.sample(batch_size=batch_size)
+        ) = memory.sample(batch_size = n_batches * batch_size)       
 
-        state_batch = torch.FloatTensor(state_batch).to(self.device)  # [batch, 122]
-        next_state_batch = torch.FloatTensor(next_state_batch).to(
+        
+        state = torch.FloatTensor(state_batch).to(self.device)  # [batch, 122]
+        next_state = torch.FloatTensor(next_state_batch).to(
             self.device
         )  # [batch, 122]
-        action_batch = torch.FloatTensor(action_batch).to(self.device)  # [batch, 2]
-        reward_batch = torch.FloatTensor(reward_batch).to(self.device).unsqueeze(1)
-        done_batch = torch.FloatTensor(done_batch).to(self.device).unsqueeze(1)
+        action = torch.FloatTensor(action_batch).to(self.device)  # [batch, 2]
+        reward = torch.FloatTensor(reward_batch).to(self.device).unsqueeze(1)
+        done = torch.FloatTensor(done_batch).to(self.device).unsqueeze(1)
+
+        
+        data = TensorDataset(state, next_state, action, reward, done)
+        data_loader = torch.utils.data.DataLoader(dataset=data, batch_size=batch_size, shuffle=True, pin_memory=False)
         t1 = time.time()
         # 更新Q-Net权重参数
-        with torch.no_grad():
-            next_state_action, next_state_log_pi, _, _ = self.policy.sample(
-                next_state_batch
-            )
-            qf1_next_target, qf2_next_target = self.critic_target(
-                next_state_batch, next_state_action
-            )
-            min_qf_next_target = (
-                torch.min(qf1_next_target, qf2_next_target)
-                - self.alpha * next_state_log_pi
-            )
-            next_q_value = reward_batch + (1 - done_batch) * self.gamma * (
-                min_qf_next_target
-            )
+        for x in data_loader:
+            state_batch = x[0]  # [batch, 122]
+            next_state_batch = x[1]
+            action_batch = x[2]
+            reward_batch = x[3]
+            done_batch = x[4]
 
-        qf1, qf2 = self.critic(
-            state_batch, action_batch
-        )  # Two Q-functions to mitigate positive bias in the policy improvement step
-        qf1_loss = F.mse_loss(qf1, next_q_value)  #
-        qf2_loss = F.mse_loss(qf2, next_q_value)  #
-        qf_loss = qf1_loss + qf2_loss
+            with torch.no_grad():
+                next_state_action, next_state_log_pi, _, _ = self.policy.sample(
+                    next_state_batch
+                )
+                qf1_next_target, qf2_next_target = self.critic_target(
+                    next_state_batch, next_state_action
+                )
+                min_qf_next_target = (
+                    torch.min(qf1_next_target, qf2_next_target)
+                    - self.alpha * next_state_log_pi
+                )
+                next_q_value = reward_batch + (1 - done_batch) * self.gamma * (
+                    min_qf_next_target
+                )
 
-        self.critic_optim.zero_grad()
-        qf_loss.backward()
-        self.critic_optim.step()
+            qf1, qf2 = self.critic(
+                state_batch, action_batch
+            )  # Two Q-functions to mitigate positive bias in the policy improvement step
+            qf1_loss = F.mse_loss(qf1, next_q_value)  #
+            qf2_loss = F.mse_loss(qf2, next_q_value)  #
+            qf_loss = qf1_loss + qf2_loss
+
+            self.critic_optim.zero_grad()
+            qf_loss.backward()
+            self.critic_optim.step()
         t2 = time.time()
         self.update_q_t += t2 - t1
 
         # 更新Actor(policy)权重参数
-        pi, log_pi, mean, log_std = self.policy.sample(state_batch)
+        for x in data_loader:
+            state_batch = x[0]
+            pi, log_pi, mean, log_std = self.policy.sample(state_batch)
 
-        qf1_pi, qf2_pi = self.critic(state_batch, pi)
-        min_qf_pi = torch.min(qf1_pi, qf2_pi)
+            qf1_pi, qf2_pi = self.critic(state_batch, pi)
+            min_qf_pi = torch.min(qf1_pi, qf2_pi)
 
-        policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean()
+            policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean()
 
-        self.policy_optim.zero_grad()
-        policy_loss.backward()
-        self.policy_optim.step()
+            self.policy_optim.zero_grad()
+            policy_loss.backward()
+            self.policy_optim.step()
 
-        t3 = time.time()
-        self.update_actor_t += t3 - t2
+            t3 = time.time()
+            self.update_actor_t += t3 - t2
 
-        # 更新alpha参数
-        alpha_loss = -(self.log_alpha * (log_pi + self.target_entropy).detach()).mean()
+            # 更新alpha参数
+            alpha_loss = -(self.log_alpha * (log_pi + self.target_entropy).detach()).mean()
 
-        self.alpha_optim.zero_grad()
-        alpha_loss.backward()
-        self.alpha_optim.step()
+            self.alpha_optim.zero_grad()
+            alpha_loss.backward()
+            self.alpha_optim.step()
 
-        self.alpha = self.log_alpha.exp()
+            self.alpha = self.log_alpha.exp()
 
-        t4 = time.time()
-        self.update_alpha_t += t4 - t3
+            t4 = time.time()
+            self.update_alpha_t += t4 - t3
 
         # 更新Target Net权重参数
         soft_update(self.critic_target, self.critic, self.tau)
@@ -341,6 +357,7 @@ class SAC(object):
             self.log_alpha.data = checkpoint_p['log_alpha']
             self.log_alpha.grad = checkpoint_p['log_alpha_grad']
             self.alpha_optim.load_state_dict(checkpoint_p['alpha_optimizer'])
+            self.log_alpha = self.log_alpha.to(self.device)
             self.alpha = self.log_alpha.exp()
             
             print('***Models load***')
